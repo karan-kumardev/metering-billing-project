@@ -11,7 +11,9 @@ TOKEN_LIMIT = 1000
 
 requests={}
 tenant_usage={}
-tenant_plans = {}  # tenant_id -> "free" or "pro"
+tenant_plans = {} 
+processed_webhook_events = set()  # add this near your other dicts, at the top of the file
+
 
 PLAN_LIMITS = {
     "free": 1000,
@@ -74,6 +76,11 @@ async def stripe_webhook(request: Request):
     except stripe.error.SignatureVerificationError:
         raise HTTPException(status_code=400, detail="Invalid signature")
 
+    if event["id"] in processed_webhook_events:
+        return {"status": "already processed"}
+
+    processed_webhook_events.add(event["id"])
+
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
         tenant_id = session["metadata"]["tenant_id"]
@@ -81,6 +88,10 @@ async def stripe_webhook(request: Request):
         tenant_plans[tenant_id] = "pro"
     else:
         print(f"IGNORED EVENT TYPE: {event['type']}")
+
+    return {"status": "received"}
+
+
 
 @app.get("/debug/tenant/{tenant_id}")
 def debug_tenant(tenant_id: str):
