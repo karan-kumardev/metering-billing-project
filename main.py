@@ -14,11 +14,17 @@ tenant_usage={}
 tenant_plans = {} 
 processed_webhook_events = set()  # add this near your other dicts, at the top of the file
 
+PRICING = {
+    "input_per_1k": 0.01,
+    "cached_input_per_1k": 0.005,
+    "output_per_1k": 0.03,
+}
 
 PLAN_LIMITS = {
     "free": 1000,
     "pro": 100000,
 }
+
 @app.post("/generate")
 def generate(idempotency_key: str = Header(), tenant_id: str = Header(...)):
 
@@ -27,7 +33,9 @@ def generate(idempotency_key: str = Header(), tenant_id: str = Header(...)):
 
     current_usage = tenant_usage.get(tenant_id, 0)
     input_tokens = 300
+    cached_input_tokens = 100
     output_tokens = 400
+    reasoning_tokens = 50
     tokens = input_tokens + output_tokens
 
     plan = tenant_plans.get(tenant_id, "free")
@@ -38,12 +46,21 @@ def generate(idempotency_key: str = Header(), tenant_id: str = Header(...)):
 
     tenant_usage[tenant_id] = current_usage + tokens
 
-    cost = 0.1 * tokens
+    input_cost = (input_tokens / 1000) * PRICING["input_per_1k"]
+    cached_input_cost = (cached_input_tokens / 1000) * PRICING["cached_input_per_1k"]
+    output_cost = ((output_tokens + reasoning_tokens) / 1000) * PRICING["output_per_1k"]
 
-    result = {"tokens_used": tokens, "total_cost": cost}
+    cost = input_cost + cached_input_cost + output_cost
+
+    result = {
+        "input_tokens": input_tokens,
+        "cached_input_tokens": cached_input_tokens,
+        "output_tokens": output_tokens,
+        "reasoning_tokens": reasoning_tokens,
+        "total_cost": round(cost, 6),
+    }
     requests[idempotency_key] = result
     return result
-
 
 @app.post("/create-checkout-session")
 def create_checkout_session(tenant_id: str = Header(...)):
