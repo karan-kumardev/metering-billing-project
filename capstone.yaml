@@ -1,0 +1,26 @@
+name: flyrank-capstone-metering-billing
+description: Usage metering & billing engine — idempotent metering, quota enforcement, AI-token pricing, Stripe test-mode subscriptions
+
+run: docker compose up -d --build
+seed: |
+  curl -X POST http://localhost:8000/generate -H "Idempotency-Key: seed1" -H "Tenant-Id: seedTenant"
+test: docker compose exec api pytest
+base_url: http://localhost:8000
+
+endpoints:
+  - method: POST
+    path: /generate
+    headers: [Idempotency-Key, Tenant-Id]
+    description: Meter a simulated billable AI call; enforces quota; returns token/cost breakdown
+  - method: GET
+    path: /usage
+    headers: [Tenant-Id]
+    description: Returns plan, used tokens, limit, and total cost for a tenant
+  - method: POST
+    path: /create-checkout-session
+    headers: [Tenant-Id]
+    description: Creates a Stripe Checkout session (test mode) for the Pro plan
+  - method: POST
+    path: /webhooks/stripe
+    headers: [Stripe-Signature]
+    description: Stripe webhook receiver; verifies signature, deduplicates events, upgrades tenant plan

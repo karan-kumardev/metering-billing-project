@@ -3,3 +3,5 @@ uvicorn
 python-dotenv
 psycopg[binary]
 stripe
+pytest
+httpx
