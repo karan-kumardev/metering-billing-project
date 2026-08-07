@@ -141,7 +141,6 @@ def create_checkout_session(tenant_id: str = Header(...)):
 def success():
     return {"message": "Payment successful! Your plan will update shortly."}    
 
-
 @app.post("/webhooks/stripe")
 async def stripe_webhook(request: Request):
     payload = await request.body()
@@ -153,26 +152,41 @@ async def stripe_webhook(request: Request):
     except stripe.error.SignatureVerificationError:
         raise HTTPException(status_code=400, detail="Invalid signature")
 
-    if event["id"] in processed_webhook_events:
+    existing_event = cursor.execute(
+        "SELECT * FROM processed_webhook_events WHERE event_id = %s", (event["id"],)
+    ).fetchone()
+
+    if existing_event:
         return {"status": "already processed"}
 
-    processed_webhook_events.add(event["id"])
+    cursor.execute("INSERT INTO processed_webhook_events (event_id) VALUES (%s)", (event["id"],))
+    conn.commit()
 
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
         tenant_id = session["metadata"]["tenant_id"]
         print(f"UPGRADING TENANT: {tenant_id}")
-        tenant_plans[tenant_id] = "pro"
+
+        cursor.execute(
+            """INSERT INTO tenants (id, plan) VALUES (%s, %s)
+               ON CONFLICT (id) DO UPDATE SET plan = %s""",
+            (tenant_id, "pro", "pro")
+        )
+        conn.commit()
     else:
         print(f"IGNORED EVENT TYPE: {event['type']}")
 
     return {"status": "received"}
 
-
-
 @app.get("/debug/tenant/{tenant_id}")
 def debug_tenant(tenant_id: str):
-    return {
-        "plan": tenant_plans.get(tenant_id, "free"),
-        "usage": tenant_usage.get(tenant_id, 0)
-    }
+    tenant_row = cursor.execute("SELECT * FROM tenants WHERE id = %s", (tenant_id,)).fetchone()
+    plan = tenant_row[1] if tenant_row else "free"
+
+    usage_row = cursor.execute(
+        "SELECT SUM(input_tokens + output_tokens) FROM usage_events WHERE tenant_id = %s",
+        (tenant_id,)
+    ).fetchone()
+    usage = usage_row[0] if usage_row[0] is not None else 0
+
+    return {"plan": plan, "usage": usage}
