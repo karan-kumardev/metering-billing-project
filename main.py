@@ -10,11 +10,6 @@ stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
 app=FastAPI()
 TOKEN_LIMIT = 1000
 
-requests={}
-tenant_usage={}
-tenant_plans = {} 
-processed_webhook_events = set()  # add this near your other dicts, at the top of the file
-
 PRICING = {
     "input_per_1k": 0.01,
     "cached_input_per_1k": 0.005,
