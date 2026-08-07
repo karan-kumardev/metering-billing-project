@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException,Header,Request
 import stripe
 import os
+import psycopg
 
 load_dotenv()
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
@@ -24,6 +25,35 @@ PLAN_LIMITS = {
     "free": 1000,
     "pro": 100000,
 }
+
+DATABASE_URL=os.environ.get("DATABASE_URL")
+conn=psycopg.connect(DATABASE_URL)
+cursor=conn.cursor()
+
+
+cursor.execute("""CREATE TABLE IF NOT EXISTS tenants (
+    id TEXT PRIMARY KEY,
+    plan TEXT NOT NULL DEFAULT 'free');
+    """)
+
+cursor.execute("""CREATE TABLE IF NOT EXISTS usage_events (
+    id SERIAL PRIMARY KEY,
+    tenant_id TEXT NOT NULL REFERENCES tenants(id),
+    idempotency_key TEXT NOT NULL UNIQUE,
+    input_tokens INTEGER NOT NULL,
+    cached_input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    reasoning_tokens INTEGER NOT NULL,
+    total_cost NUMERIC(10, 6) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);""")
+
+
+cursor.execute("""CREATE TABLE IF NOT EXISTS processed_webhook_events (
+                    event_id TEXT PRIMARY KEY
+);""")
+
+conn.commit()
 
 @app.post("/generate")
 def generate(idempotency_key: str = Header(), tenant_id: str = Header(...)):
