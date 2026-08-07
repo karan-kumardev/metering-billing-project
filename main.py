@@ -58,39 +58,69 @@ conn.commit()
 @app.post("/generate")
 def generate(idempotency_key: str = Header(), tenant_id: str = Header(...)):
 
-    if idempotency_key in requests:
-        return requests[idempotency_key]
-
-    current_usage = tenant_usage.get(tenant_id, 0)
     input_tokens = 300
     cached_input_tokens = 100
     output_tokens = 400
     reasoning_tokens = 50
     tokens = input_tokens + output_tokens
 
-    plan = tenant_plans.get(tenant_id, "free")
+    existing = cursor.execute(
+        "SELECT * FROM usage_events WHERE idempotency_key = %s", (idempotency_key,)
+    ).fetchone()
+
+    if existing:
+        return {
+            "input_tokens": existing[3],
+            "cached_input_tokens": existing[4],
+            "output_tokens": existing[5],
+            "reasoning_tokens": existing[6],
+            "total_cost": float(existing[7]),
+        }
+
+    tenant_row = cursor.execute(
+        "SELECT * FROM tenants WHERE id = %s", (tenant_id,)
+    ).fetchone()
+
+    tokens_row = cursor.execute(
+        "SELECT SUM(input_tokens + output_tokens) FROM usage_events WHERE tenant_id = %s",
+        (tenant_id,)
+    ).fetchone()
+    current_usage = tokens_row[0] if tokens_row[0] is not None else 0
+
+    if not tenant_row:
+        cursor.execute("INSERT INTO tenants (id, plan) VALUES (%s, %s)", (tenant_id, 'free'))
+        conn.commit()
+        plan = "free"
+    else:
+        plan = tenant_row[1]
+
     limit = PLAN_LIMITS[plan]
 
     if current_usage + tokens > limit:
         raise HTTPException(status_code=429, detail="Usage quota exceeded")
 
-    tenant_usage[tenant_id] = current_usage + tokens
-
     input_cost = (input_tokens / 1000) * PRICING["input_per_1k"]
     cached_input_cost = (cached_input_tokens / 1000) * PRICING["cached_input_per_1k"]
     output_cost = ((output_tokens + reasoning_tokens) / 1000) * PRICING["output_per_1k"]
-
     cost = input_cost + cached_input_cost + output_cost
 
-    result = {
+    cursor.execute(
+        """INSERT INTO usage_events 
+           (tenant_id, idempotency_key, input_tokens, cached_input_tokens, output_tokens, reasoning_tokens, total_cost)
+           VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+        (tenant_id, idempotency_key, input_tokens, cached_input_tokens, output_tokens, reasoning_tokens, round(cost, 6))
+    )
+    conn.commit()
+
+    return {
         "input_tokens": input_tokens,
         "cached_input_tokens": cached_input_tokens,
         "output_tokens": output_tokens,
         "reasoning_tokens": reasoning_tokens,
         "total_cost": round(cost, 6),
     }
-    requests[idempotency_key] = result
-    return result
+
+
 
 @app.post("/create-checkout-session")
 def create_checkout_session(tenant_id: str = Header(...)):
