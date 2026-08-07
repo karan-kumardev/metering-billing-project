@@ -8,7 +8,7 @@ load_dotenv()
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
 
 app=FastAPI()
-TOKEN_LIMIT = 1000
+
 
 PRICING = {
     "input_per_1k": 0.01,
@@ -185,3 +185,26 @@ def debug_tenant(tenant_id: str):
     usage = usage_row[0] if usage_row[0] is not None else 0
 
     return {"plan": plan, "usage": usage}
+
+
+
+@app.get("/usage")
+def get_usage(tenant_id: str = Header(...)):
+    tenant_row = cursor.execute("SELECT * FROM tenants WHERE id = %s", (tenant_id,)).fetchone()
+    plan = tenant_row[1] if tenant_row else "free"
+    limit = PLAN_LIMITS[plan]
+
+    usage_row = cursor.execute(
+        "SELECT SUM(input_tokens + output_tokens), SUM(total_cost) FROM usage_events WHERE tenant_id = %s",
+        (tenant_id,)
+    ).fetchone()
+
+    used = usage_row[0] if usage_row[0] is not None else 0
+    total_cost = float(usage_row[1]) if usage_row[1] is not None else 0.0
+
+    return {
+        "plan": plan,
+        "used": used,
+        "limit": limit,
+        "total_cost": round(total_cost, 6),
+    }
